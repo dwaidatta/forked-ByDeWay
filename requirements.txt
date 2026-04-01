@@ -26,3 +26,5 @@ numpy
 torch
 matplotlib
 huggingface_hub
+ultralytics
+scikit-learn

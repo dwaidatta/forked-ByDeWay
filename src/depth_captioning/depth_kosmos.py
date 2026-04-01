@@ -1,15 +1,22 @@
-import os
+import sys
+from pathlib import Path
 
+# Add Depth-Anything-V2 to sys.path
+current_file_path = Path(__file__).resolve()
+project_root = current_file_path.parents[2]  # Adjust based on directory structure: src/depth_captioning -> root
+depth_anything_path = project_root / "Depth-Anything-V2"
 
-# Verify the current directory
-current_dir = os.getcwd()
+if depth_anything_path.exists():
+    sys.path.append(str(depth_anything_path))
+else:
+    # Fallback for when running from root
+    depth_anything_path = Path.cwd() / "Depth-Anything-V2"
+    if depth_anything_path.exists():
+        sys.path.append(str(depth_anything_path))
+    else:
+        print(f"Warning: Depth-Anything-V2 not found at {depth_anything_path}")
 
-# Change to the desired directory
-os.chdir(f"{current_dir}/Depth-Anything-V2")
-
-current_dir = os.getcwd()
-
-print(f"Current directory: {current_dir}")
+print(f"Added to sys.path: {depth_anything_path}")
 
 import cv2
 import numpy as np
@@ -21,10 +28,11 @@ from depth_anything_v2.dpt import DepthAnythingV2
 import matplotlib
 import torch
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForVision2Seq
+from transformers import AutoProcessor, AutoModelForImageTextToText as AutoModelForVision2Seq
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
+from .spatial_analysis import SpatialAnalyzer
 
 
 class DepthContextCreator:
@@ -93,7 +101,9 @@ class DepthContextCreator:
             tmp_raw_depth.name,
         ]
 
-    def make_depth_context_img(self, image, top_threshold=70, bottom_threshold=30):
+    def make_depth_context_img(
+        self, image, top_threshold=70, bottom_threshold=30, return_masks=False
+    ):
         image_array = np.array(image)
         # print("Image loaded as NumPy array:")
         # print(image_array.shape)
@@ -115,6 +125,12 @@ class DepthContextCreator:
         top30_image = np.where(top30_mask, image_array, 0)
         bottom30_image = np.where(bottom30_mask, image_array, 0)
         mid40_image = np.where(mid40_mask, image_array, 0)
+        if return_masks:
+            return [top30_image, bottom30_image, mid40_image], [
+                top30_mask,
+                bottom30_mask,
+                mid40_mask,
+            ]
         return [top30_image, bottom30_image, mid40_image]
 
 
@@ -126,7 +142,7 @@ class Kosmos2Captioner:
             self.device = device
         print(f"Using device: {self.device}")
         self.processor = AutoProcessor.from_pretrained(ckpt)
-        self.model = AutoModelForVision2Seq.from_pretrained(ckpt).to(self.device)
+        self.model = AutoModelForVision2Seq.from_pretrained(ckpt, low_cpu_mem_usage=True).to(self.device)
 
     def get_caption_and_entities(self, image_array):
         image = Image.fromarray(image_array.astype("uint8"))
@@ -151,26 +167,49 @@ class Kosmos2Captioner:
 
 
 class DepthKosmosCaptioner:
-    def __init__(self, ckpt="microsoft/kosmos-2-patch14-224", device=None):
+    def __init__(self, ckpt="microsoft/kosmos-2-patch14-224", device=None, encoder="vits"):
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = device
         print(f"Using device: {self.device}")
-        self.processor = AutoProcessor.from_pretrained(ckpt)
-        self.model = AutoModelForVision2Seq.from_pretrained(ckpt).to(self.device)
-        self.depth_context = DepthContextCreator()
+        # Initialize Kosmos-2 first to ensure it fits? Or maybe DepthContextCreator is lighter?
+        # Depth-Anything-V2-Large is heavy. We default to 'vits' (small) now for better compatibility.
+        self.encoder = encoder
+        
+        print(f"Initializing DepthContextCreator with encoder='{self.encoder}'...")
+        self.depth_context = DepthContextCreator(encoder=self.encoder)
+        
+        print(f"Initializing Kosmos2Captioner with ckpt='{ckpt}'...")
         self.captioner = Kosmos2Captioner(ckpt=ckpt, device=self.device)
+        
+        print("Initializing SpatialAnalyzer...")
+        self.spatial_analyzer = SpatialAnalyzer()
+        
         self.location = ["Closest", "Farthest", "Mid Range"]
 
     def get_caption_with_depth(self, image, top_threshold=70, bottom_threshold=30):
-        images = self.depth_context.make_depth_context_img(
-            image, top_threshold=top_threshold, bottom_threshold=bottom_threshold
+        images, masks = self.depth_context.make_depth_context_img(
+            image,
+            top_threshold=top_threshold,
+            bottom_threshold=bottom_threshold,
+            return_masks=True,
         )
+        
+        # Analyze spatial relationships
+        print("Analyzing spatial relationships...", flush=True)
+        spatial_descriptions = self.spatial_analyzer.analyze(np.array(image), masks)
+        
         full_string = ""
         for i in range(3):
             caption, entities = self.captioner.get_caption_and_entities(images[i])
-            full_string += f"{self.location[i]}: {entities[0][0]}\n----\n"
+            spatial_info = spatial_descriptions[i]
+            
+            section_text = f"{self.location[i]}: {entities[0][0]}"
+            if spatial_info:
+                section_text += f"\nSpatial Relationships: {spatial_info}"
+            
+            full_string += f"{section_text}\n----\n"
         return full_string
 
     def display_depth_images(self, image):
