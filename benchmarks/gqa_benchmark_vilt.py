@@ -79,20 +79,24 @@ def _predict_vilt(vqa_model, processor, image, prompt):
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate ViLT on GQA with Spatial LDP")
     parser.add_argument("--dry_run", action="store_true", help="Run on only 5 samples for testing")
-    parser.add_argument("--output", type=str, default="data/gqa_vilt_spatial_predictions.jsonl", help="Output JSONL file")
+    parser.add_argument("--output", type=str, default=None, help="Output JSONL file (auto-generated from mode if not set)")
     parser.add_argument("--dataset", type=str, default="Rajarshi-Roy-research/GQA-dataset-150", help="HF Dataset repository")
     parser.add_argument("--split", type=str, default="train", help="Dataset split to use")
     parser.add_argument("--vqa_model", type=str, default="dandelin/vilt-b32-finetuned-vqa", help="ViLT VQA checkpoint")
     parser.add_argument("--depth_encoder", type=str, default="vits", choices=["vits","vitb","vitl","vitg"], help="Depth Anything V2 encoder size.")
     parser.add_argument("--yolo_model", type=str, default="yolov8n.pt", help="YOLO model for spatial analysis.")
     parser.add_argument("--use_context", action="store_true", help="Include LDP+spatial context in the text prompt")
-    parser.add_argument("--device", type=str, default="cpu", help="Device to use for models (cpu/cuda)")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use for models (cpu/cuda)")
     parser.add_argument("--mode", type=str, default="ldp_spatial", choices=["ldp", "ldp_spatial"], help="Context mode")
     return parser.parse_args()
 
 def main():
     args = parse_args()
+    # Auto-generate output filename from mode if not explicitly provided
+    if args.output is None:
+        args.output = f"data/gqa_vilt_{args.mode}_predictions.jsonl"
     print(f"Starting GQA Benchmark for ViLT on device: {args.device}")
+    print(f"Mode: {args.mode} | Output: {args.output}")
     
     print("\n[1/3] Initializing DepthBlipCaptioner ...")
     depth_captioner = DepthBlipCaptioner(

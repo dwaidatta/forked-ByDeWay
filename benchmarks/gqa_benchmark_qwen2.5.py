@@ -42,7 +42,7 @@ def exact_match(prediction: str, ground_truth: str) -> bool:
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Qwen 2.5-VL on GQA with LDP or LDP+Spatial.")
     parser.add_argument("--dry_run", action="store_true", help="Process 5 samples only.")
-    parser.add_argument("--output", type=str, default="data/gqa_qwen25vl_ldp_spatial_predictions.jsonl")
+    parser.add_argument("--output", type=str, default=None, help="Output JSONL file (auto-generated from mode if not set)")
     parser.add_argument("--dataset", type=str, default="Rajarshi-Roy-research/GQA-dataset-150")
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--device", type=str, default="cuda", help="Device for depth/caption pipeline.")
@@ -132,7 +132,11 @@ def ask_qwen_generative(
 def main():
     args = parse_args()
 
+    # Auto-generate output filename from mode if not explicitly provided
+    if args.output is None:
+        args.output = f"data/gqa_qwen25vl_{args.mode}_predictions.jsonl"
     print(f"Starting Qwen GQA benchmark mode={args.mode} model={args.qwen_model_path} device={args.device}")
+    print(f"Output: {args.output}")
     
     print("\n[1/4] Initializing depth + caption + spatial pipeline...")
     depth_captioner = DepthBlipCaptioner(

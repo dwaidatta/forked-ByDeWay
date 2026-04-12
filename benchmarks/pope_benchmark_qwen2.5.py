@@ -33,7 +33,7 @@ _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Qwen 2.5-VL on POPE with LDP or LDP+Spatial.")
     parser.add_argument("--dry_run", action="store_true", help="Process 5 samples only.")
-    parser.add_argument("--output", type=str, default="data/pope_qwen25vl_ldp_spatial_predictions.jsonl")
+    parser.add_argument("--output", type=str, default=None, help="Output JSONL file (auto-generated from mode if not set)")
     parser.add_argument("--dataset", type=str, default="Rajarshi-Roy-research/lmms-lab-POPE")
     parser.add_argument("--split", type=str, default="test_with_depth")
     parser.add_argument("--device", type=str, default="cuda", help="Device for depth/caption pipeline.")
@@ -140,7 +140,11 @@ def ask_qwen_yes_no(
 def main():
     args = parse_args()
 
+    # Auto-generate output filename from mode if not explicitly provided
+    if args.output is None:
+        args.output = f"data/pope_qwen25vl_{args.mode}_predictions.jsonl"
     print(f"Starting Qwen benchmark mode={args.mode} model={args.qwen_model_path} device={args.device}")
+    print(f"Output: {args.output}")
     
     print("\n[1/4] Initializing depth + caption + spatial pipeline...")
     depth_captioner = DepthBlipCaptioner(
