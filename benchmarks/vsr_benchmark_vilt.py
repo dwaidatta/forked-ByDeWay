@@ -45,13 +45,17 @@ _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
 # ─── Utility Functions ──────────────────────────────────────────────
 
-def _shorten(text: str, max_words: int = 18) -> str:
+def _compress_for_vilt(text: str, max_words: int = 6) -> str:
+    """Aggressively shortens text to fit within ViLT's 40-token limit by removing articles and filler words."""
     if not text:
         return ""
-    words = str(text).strip().split()
+    # Remove common filler words to save tokens
+    text = re.sub(r'\b(the|a|an|is|are|of|in|on|at|to)\b', '', text, flags=re.IGNORECASE)
+    # Remove extra spaces
+    words = text.split()
     if len(words) <= max_words:
         return " ".join(words)
-    return " ".join(words[:max_words]) + " ..."
+    return " ".join(words[:max_words])
 
 
 def _predict_vilt(vqa_model, processor, image, prompt):
@@ -279,7 +283,7 @@ def main():
                     # Layer votes
                     for li, layer_np in enumerate(layer_imgs):
                         layer_pil = Image.fromarray(layer_np.astype("uint8"))
-                        cap = _shorten(depth_captioner.captioner.get_caption(layer_np), max_words=10)
+                        cap = _compress_for_vilt(depth_captioner.captioner.get_caption(layer_np), max_words=10)
                         prompt = f'Q: {question} Ctx: [{layer_names[li]}] {cap}. A:'
 
                         lp, ls = _vilt_yes_no_scores(vqa_model, vqa_processor, layer_pil, prompt)
@@ -302,7 +306,7 @@ def main():
                     # Original + spatial
                     spatial_bits = []
                     if vsr_spatial:
-                        spatial_bits.append(f"Spatial: {_shorten(vsr_spatial, 20)}")
+                        spatial_bits.append(f"Spatial: {_compress_for_vilt(vsr_spatial, 20)}")
                     spatial_ctx = ". ".join(spatial_bits) if spatial_bits else ""
                     enriched_q = f'Q: {question} Ctx: {spatial_ctx}. A:' if spatial_ctx else question
 
@@ -315,16 +319,16 @@ def main():
                     li = 2
                     layer_np = layer_imgs[li]
                     layer_pil = Image.fromarray(layer_np.astype("uint8"))
-                    cap = _shorten(depth_captioner.captioner.get_caption(layer_np), max_words=10)
+                    cap = _compress_for_vilt(depth_captioner.captioner.get_caption(layer_np), max_words=10)
                     layer_rel = depth_captioner.spatial_analyzer.analyze(
                         np.array(image), masks, max_relations_per_layer=4
                     )[li]
 
                     ctx_bits = [f"[{layer_names[li]}] {cap}."]
                     if layer_rel:
-                        ctx_bits.append(f"[Sp] {_shorten(layer_rel, 12)}.")
+                        ctx_bits.append(f"[Sp] {_compress_for_vilt(layer_rel, 6)}.")
                     if vsr_spatial:
-                        ctx_bits.append(f"[VSR] {_shorten(vsr_spatial, 15)}.")
+                        ctx_bits.append(f"[VSR] {_compress_for_vilt(vsr_spatial, 6)}.")
                     small_ctx = " ".join(ctx_bits)
 
                     prompt = f'Q: {question} Ctx: {small_ctx} A:'

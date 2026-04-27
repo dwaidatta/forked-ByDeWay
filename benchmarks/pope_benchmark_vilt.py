@@ -24,13 +24,17 @@ from src.depth_captioning.depth_blip import DepthBlipCaptioner
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
-def _shorten(text: str, max_words: int = 18) -> str:
+def _compress_for_vilt(text: str, max_words: int = 6) -> str:
+    """Aggressively shortens text to fit within ViLT's 40-token limit by removing articles and filler words."""
     if not text:
         return ""
-    words = str(text).strip().split()
+    # Remove common filler words to save tokens
+    text = re.sub(r'\b(the|a|an|is|are|of|in|on|at|to)\b', '', text, flags=re.IGNORECASE)
+    # Remove extra spaces
+    words = text.split()
     if len(words) <= max_words:
         return " ".join(words)
-    return " ".join(words[:max_words]) + " ..."
+    return " ".join(words[:max_words])
 
 def _normalize_yes_no(text: str) -> str:
     """
@@ -196,14 +200,14 @@ def main():
                                 layer_pil = Image.fromarray(layer_np.astype("uint8"))
                                 rel_text = layer_rel[li]
 
-                                caption = _shorten(depth_captioner.captioner.get_caption(layer_np), max_words=16)
-                                rel_text = _shorten(rel_text, max_words=24)
+                                caption = _compress_for_vilt(depth_captioner.captioner.get_caption(layer_np), max_words=6)
+                                rel_text = _compress_for_vilt(rel_text, max_words=8)
 
                                 ctx_bits = []
                                 if caption:
-                                    ctx_bits.append(f"[{layer_names[li]}] {caption}.")
+                                    ctx_bits.append(f"[{layer_names[li][:3]}] {caption}.")
                                 if rel_text:
-                                    ctx_bits.append(f"[Spatial] {rel_text}.")
+                                    ctx_bits.append(f"[Sp] {rel_text}.")
                                 small_ctx = " ".join(ctx_bits)
 
                                 layer_prompt = f"Question: {question} Context: {small_ctx}. Answer:"
