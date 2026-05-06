@@ -140,7 +140,7 @@ def ask_qwen_true_false(
     elif mode == "ldp":
         prompt = (
             "You are evaluating whether a spatial description of an image is true or false.\n"
-            "Use the image as primary evidence. Use the depth context as auxiliary evidence.\n"
+            "Use the image as primary evidence. Use the depth context as advisory hints to help resolve ambiguity.\n"
             "Answer with only one word: true or false.\n\n"
             f"Depth Context:\n{context}\n\n"
             f'Statement: "{caption}"'
@@ -151,10 +151,11 @@ def ask_qwen_true_false(
             spatial_section = f"\nDetected Spatial Relations:\n{vsr_spatial}\n"
 
         prompt = (
-            "You are evaluating whether a spatial description of an image is true or false.\n"
-            "Use the image as primary evidence. Use the depth context and detected spatial relations "
-            "as auxiliary evidence to help you understand spatial arrangements.\n"
-            "Answer with only one word: true or false.\n\n"
+            "You are a spatial reasoning expert tasked with verifying if a statement is true or false.\n"
+            "Use the image as your primary evidence. The 'Depth Context' and 'Spatial Relations' provided below "
+            "are auxiliary hints extracted from geometric sensors. Use these hints to resolve ambiguity, "
+            "but if they seem to contradict your visual perception, prioritize the image.\n"
+            "Answer with ONLY 'true' or 'false'.\n\n"
             f"Depth Context:\n{context}\n"
             f"{spatial_section}\n"
             f'Statement: "{caption}"'

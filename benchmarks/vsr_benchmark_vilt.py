@@ -345,6 +345,7 @@ def main():
 
                 elif args.mode == "spatial":
                     # Spatial-only: Logit Ensembling (Mathematical Voting)
+                    # This avoids the ViLT token limit by not injecting text into the prompt.
                     pred_yn, scores = _vilt_yes_no_scores(vqa_model, vqa_processor, image, question)
                     m = scores.get("yes", 0) - scores.get("no", 0)
                     
@@ -352,18 +353,33 @@ def main():
                     if vsr_spatial:
                         vsr_lower = vsr_spatial.lower()
                         rel_lower = relation.lower()
-                        if rel_lower in vsr_lower:
-                            yolo_vote = 3.0  # YOLO confirms relation
+                        
+                        # Define synonymous spatial clusters for more robust matching
+                        synonyms = {
+                            "on top of": ["on top of", "above", "over", "on"],
+                            "above": ["above", "on top of", "over"],
+                            "below": ["below", "under", "beneath"],
+                            "under": ["under", "below", "beneath"],
+                            "near": ["near", "close to", "by", "adjacent to"],
+                            "next to": ["next to", "beside", "adjacent to", "side by side"]
+                        }
+                        
+                        # Check for direct match or synonym match
+                        matches = [rel_lower] + synonyms.get(rel_lower, [])
+                        is_confirmed = any(m_word in vsr_lower for m_word in matches)
+                        
+                        if is_confirmed:
+                            yolo_vote = 2.0  # Mathematical boost
                         elif subj and obj and (subj.lower() in vsr_lower) and (obj.lower() in vsr_lower):
-                            yolo_vote = -3.0 # YOLO found objects but not this relation
+                            yolo_vote = -2.0 # Penalty if objects found but relation differs
                             
                     m += yolo_vote
                     pred_yn = "yes" if m >= 0 else "no"
                     
                     raw_pred = json.dumps({
-                        "strategy": "spatial_logit_ensemble", 
+                        "strategy": "spatial_logit_ensemble_calibrated", 
                         "pred": pred_yn, 
-                        "original_scores": scores,
+                        "original_margin": m - yolo_vote,
                         "yolo_vote": yolo_vote,
                         "spatial_ctx": vsr_spatial
                     })
@@ -377,7 +393,7 @@ def main():
                     vote_margin = 0.0
                     details = []
 
-                    # Original + spatial
+                    # 1. Original View + YOLO Spatial Context
                     base_pred, base_scores = _vilt_yes_no_scores(vqa_model, vqa_processor, image, question)
                     base_margin = base_scores.get("yes", 0) - base_scores.get("no", 0)
                     
@@ -386,39 +402,43 @@ def main():
                         vsr_lower = vsr_spatial.lower()
                         rel_lower = relation.lower()
                         if rel_lower in vsr_lower:
-                            yolo_vote = 1.0
+                            yolo_vote = 2.0  # Increased from 1.0 for stronger signal
                         elif subj and obj and (subj.lower() in vsr_lower) and (obj.lower() in vsr_lower):
-                            yolo_vote = -1.0
+                            yolo_vote = -2.0
                             
                     base_margin += yolo_vote
                     vote_margin += base_margin
                     details.append({"view": "original+spatial", "pred": base_pred, "margin": base_margin, "yolo_vote": yolo_vote})
 
-                    # Mid Range layer + spatial
-                    li = 2
-                    layer_np = layer_imgs[li]
-                    layer_pil = Image.fromarray(layer_np.astype("uint8"))
-                    cap = _compress_for_vilt(depth_captioner.captioner.get_caption(layer_np), max_words=10)
-                    layer_rel = depth_captioner.spatial_analyzer.analyze(
-                        np.array(image), masks, max_relations_per_layer=4
-                    )[li]
+                    # 2. Vote across all 3 Depth Layers
+                    for li, layer_np in enumerate(layer_imgs):
+                        layer_pil = Image.fromarray(layer_np.astype("uint8"))
+                        cap = _compress_for_vilt(depth_captioner.captioner.get_caption(layer_np), max_words=10)
+                        
+                        # Add specific layer-level spatial relations if available
+                        layer_rel = depth_captioner.spatial_analyzer.analyze(
+                            np.array(image), masks, max_relations_per_layer=4
+                        )[li]
 
-                    ctx_bits = [f"[{layer_names[li]}] {cap}."]
-                    if layer_rel:
-                        ctx_bits.append(f"[Sp] {_compress_for_vilt(layer_rel, 6)}.")
-                    if vsr_spatial:
-                        ctx_bits.append(f"[VSR] {_compress_for_vilt(vsr_spatial, 6)}.")
-                    small_ctx = " ".join(ctx_bits)
-
-                    prompt = f'Q: {question} Ctx: {small_ctx} A:'
-                    lp, ls = _vilt_yes_no_scores(vqa_model, vqa_processor, layer_pil, prompt)
-                    m = ls.get("yes", 0) - ls.get("no", 0)
-                    vote_margin += m * 0.5
-                    details.append({"view": "MidRange+spatial", "pred": lp, "margin": m})
+                        ctx_bits = [f"[{layer_names[li]}] {cap}."]
+                        if layer_rel:
+                            ctx_bits.append(f"[Sp] {_compress_for_vilt(layer_rel, 6)}.")
+                        if vsr_spatial:
+                            ctx_bits.append(f"[VSR] {_compress_for_vilt(vsr_spatial, 6)}.")
+                        
+                        small_ctx = " ".join(ctx_bits)
+                        prompt = f'Q: {question} Ctx: {small_ctx} A:'
+                        
+                        lp, ls = _vilt_yes_no_scores(vqa_model, vqa_processor, layer_pil, prompt)
+                        m = ls.get("yes", 0) - ls.get("no", 0)
+                        
+                        # Layer votes are weighted at 0.5 each
+                        vote_margin += m * 0.5
+                        details.append({"view": f"{layer_names[li]}+spatial", "pred": lp, "margin": m})
 
                     pred_yn = "yes" if vote_margin >= 0 else "no"
                     raw_pred = json.dumps({
-                        "strategy": "ldp_spatial_vote", "margin": vote_margin, "details": details
+                        "strategy": "ldp_spatial_full_ensemble", "margin": vote_margin, "details": details
                     })
 
             except Exception as e:

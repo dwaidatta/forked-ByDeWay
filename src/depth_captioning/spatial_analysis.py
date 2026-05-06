@@ -138,7 +138,8 @@ class SpatialAnalyzer:
                   e.g., ["Object A is to the left of Object B...", "", ""]
         """
         # Run object detection
-        results = self.model(image_array, verbose=False, stream=False, device=self.device)
+        # Run object detection with a high confidence threshold
+        results = self.model(image_array, verbose=False, stream=False, device=self.device, conf=0.40)
         result = results[0]
         
         full_descriptions = ["", "", ""] # Closest, Farthest, Mid
@@ -696,8 +697,8 @@ class SpatialAnalyzer:
         parts = []
         for cat in ["projective", "proximity", "adjacency", "topological", "orientation", "directional", "unallocated"]:
             if cat in by_cat:
-                # Take top few per category to avoid bloating
-                cat_rels = by_cat[cat][:4]
+                # Take only the top 2 most confident relations per category to avoid distracting the MLLM
+                cat_rels = by_cat[cat][:2]
                 parts.extend(cat_rels)
 
         return ". ".join(parts) if parts else ""
