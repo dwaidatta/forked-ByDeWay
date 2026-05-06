@@ -134,15 +134,21 @@ def ask_qwen_yes_no(
         padding=True,
         return_tensors="pt",
     )
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    # IMPORTANT: do NOT convert BatchEncoding to dict — newer Transformers accesses
+    # inputs.input_ids as an attribute; plain dict raises AttributeError in model.generate().
+    # Also avoid model.device — with device_map='auto' it can be 'meta' for offloaded layers.
+    if torch.cuda.is_available():
+        _device = torch.device("cuda:0")
+    else:
+        _device = torch.device("cpu")
+    inputs = inputs.to(_device)
 
     # Generate answer
     with torch.no_grad():
         generated_ids = model.generate(
             **inputs, 
             max_new_tokens=max_new_tokens,
-            temperature=0.0, # Greedy decoding for benchmark consistency
-            do_sample=False
+            do_sample=False,   # greedy decoding — do NOT pass temperature when do_sample=False
         )
 
     # Trim the prompt from the generated ids

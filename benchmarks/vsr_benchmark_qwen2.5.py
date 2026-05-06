@@ -180,14 +180,23 @@ def ask_qwen_true_false(
         padding=True,
         return_tensors="pt",
     )
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    # IMPORTANT: call .to() on the BatchEncoding object itself — do NOT convert
+    # it to a plain dict first. Newer Transformers internals access inputs.input_ids
+    # as an attribute; a plain dict only supports inputs['input_ids'] and will raise
+    # "'dict' object has no attribute 'input_ids'" inside model.generate().
+    # On GPU with device_map="auto", next(model.parameters()).device can return
+    # "meta" for offloaded layers, so we determine device explicitly instead.
+    if torch.cuda.is_available():
+        _device = torch.device("cuda:0")
+    else:
+        _device = torch.device("cpu")
+    inputs = inputs.to(_device)
 
     with torch.no_grad():
         generated_ids = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            temperature=0.0,
-            do_sample=False,
+            do_sample=False,   # greedy decoding; temperature kwarg must be omitted
         )
 
     generated_ids_trimmed = [
@@ -230,12 +239,21 @@ def parse_args():
 
 def main():
     args = parse_args()
-    # Auto-generate output filename from mode if not explicitly provided
+    # Derive a short model tag from the model path (e.g. "3b" or "7b")
+    _model_tag = "qwen25vl"
+    _path_lower = args.qwen_model_path.lower()
+    for _size in ("0.5b", "1.5b", "2b", "3b", "7b", "14b", "32b", "72b"):
+        if _size in _path_lower:
+            _model_tag = f"qwen25vl_{_size.replace('.', '')}"
+            break
+
+    # Auto-generate output filename from mode + model tag if not explicitly provided
     if args.output is None:
-        args.output = f"data/vsr_qwen25vl_{args.mode}_predictions.jsonl"
+        args.output = f"data/vsr_{_model_tag}_{args.mode}_predictions.jsonl"
     print(f"╔{'═'*60}╗")
     print(f"║  VSR Benchmark (Qwen 2.5-VL) — mode={args.mode:<20} ║")
     print(f"╚{'═'*60}╝")
+    print(f"  Model:  {args.qwen_model_path}")
     print(f"  Output: {args.output}")
 
     # 1. Initialize depth + spatial pipeline
@@ -252,13 +270,26 @@ def main():
 
     # 2. Load Qwen
     print(f"\n[2/4] Loading Qwen Model ({args.qwen_model_path})...")
+    _has_cuda = torch.cuda.is_available()
+    _device_map = "auto" if _has_cuda else "cpu"
+    # NOTE: device_map="cpu" is intentional on CPU-only machines.
+    # device_map="auto" without a GPU causes newer accelerate to disk-offload
+    # parameters even when enough RAM is free, breaking inference silently.
+    # "cpu" forces all parameters into RAM (no disk), same as previous runs.
+    print(f"  device_map='{_device_map}', dtype=bfloat16")
     qwen_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.qwen_model_path,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
+        dtype=torch.bfloat16,
+        device_map=_device_map,
         attn_implementation="sdpa",
     )
     qwen_model.eval()
+
+    # Sanity check: warn if accelerate still disk-offloaded any parameters
+    meta_params = [n for n, p in qwen_model.named_parameters() if p.device.type == "meta"]
+    if meta_params:
+        print(f"\n  [WARNING] {len(meta_params)} parameter tensor(s) still on meta/disk.")
+        print("  Not enough RAM. Try closing more apps or rebooting for a clean slate.\n")
     qwen_processor = AutoProcessor.from_pretrained(args.qwen_model_path)
 
     print(f"\n[3/4] Loading dataset: {args.dataset} (split: {args.split})")

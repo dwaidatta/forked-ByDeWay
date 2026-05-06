@@ -318,8 +318,7 @@ def main():
                     base_inputs = vqa_processor(
                         images=image, text=question,
                         return_tensors="pt", truncation=True, max_length=96
-                    )
-                    base_inputs = {k: v.to(args.device) for k, v in base_inputs.items()}
+                    ).to(args.device)
                     base_pred, base_scores = _score_yes_no_from_first_step(
                         vqa_model, vqa_processor.tokenizer, base_inputs
                     )
@@ -336,8 +335,7 @@ def main():
                         layer_inputs = vqa_processor(
                             images=layer_pil, text=prompt,
                             return_tensors="pt", truncation=True, max_length=128
-                        )
-                        layer_inputs = {k: v.to(args.device) for k, v in layer_inputs.items()}
+                        ).to(args.device)
                         lp, ls = _score_yes_no_from_first_step(
                             vqa_model, vqa_processor.tokenizer, layer_inputs
                         )
@@ -373,8 +371,7 @@ def main():
                     base_inputs = vqa_processor(
                         images=image, text=enriched_q,
                         return_tensors="pt", truncation=True, max_length=160
-                    )
-                    base_inputs = {k: v.to(args.device) for k, v in base_inputs.items()}
+                    ).to(args.device)
                     base_pred, base_scores = _score_yes_no_from_first_step(
                         vqa_model, vqa_processor.tokenizer, base_inputs
                     )
@@ -402,8 +399,7 @@ def main():
                     layer_inputs = vqa_processor(
                         images=layer_pil, text=layer_prompt,
                         return_tensors="pt", truncation=True, max_length=160
-                    )
-                    layer_inputs = {k: v.to(args.device) for k, v in layer_inputs.items()}
+                    ).to(args.device)
                     lp, ls = _score_yes_no_from_first_step(
                         vqa_model, vqa_processor.tokenizer, layer_inputs
                     )

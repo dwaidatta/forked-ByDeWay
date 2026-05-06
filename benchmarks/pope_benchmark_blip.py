@@ -215,8 +215,7 @@ def main():
                         return_tensors="pt",
                         truncation=True,
                         max_length=64,
-                    )
-                    base_inputs = {k: v.to(args.device) for k, v in base_inputs.items()}
+                    ).to(args.device)
                     base_pred, base_scores = _score_yes_no_from_first_step(
                         vqa_model=vqa_model, tokenizer=vqa_processor.tokenizer, inputs=base_inputs
                     )
@@ -244,8 +243,7 @@ def main():
                                     return_tensors="pt",
                                     truncation=True,
                                     max_length=64,
-                                )
-                                layer_inputs = {k: v.to(args.device) for k, v in layer_inputs.items()}
+                                ).to(args.device)
                                 lp, ls = _score_yes_no_from_first_step(
                                     vqa_model=vqa_model, tokenizer=vqa_processor.tokenizer, inputs=layer_inputs
                                 )
@@ -284,8 +282,7 @@ def main():
                                 return_tensors="pt",
                                 truncation=True,
                                 max_length=96,
-                            )
-                            layer_inputs = {k: v.to(args.device) for k, v in layer_inputs.items()}
+                            ).to(args.device)
                             lp, ls = _score_yes_no_from_first_step(
                                 vqa_model=vqa_model, tokenizer=vqa_processor.tokenizer, inputs=layer_inputs
                             )

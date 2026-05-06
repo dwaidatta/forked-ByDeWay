@@ -93,7 +93,7 @@ def ask_qwen_generative(
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
+                {"type": "image", "image": image, "max_pixels": 313600},
                 {"type": "text", "text": prompt},
             ],
         }
@@ -108,14 +108,21 @@ def ask_qwen_generative(
         videos=video_inputs,
         padding=True,
         return_tensors="pt",
-    ).to(model.device)
+    )
+    # IMPORTANT: do NOT convert BatchEncoding to dict — newer Transformers accesses
+    # inputs.input_ids as an attribute; plain dict raises AttributeError in model.generate().
+    # Also avoid model.device — with device_map='auto' it can be 'meta' for offloaded layers.
+    if torch.cuda.is_available():
+        _device = torch.device("cuda:0")
+    else:
+        _device = torch.device("cpu")
+    inputs = inputs.to(_device)
 
     with torch.no_grad():
         generated_ids = model.generate(
             **inputs, 
             max_new_tokens=max_new_tokens,
-            temperature=0.0,
-            do_sample=False
+            do_sample=False   # greedy decoding — do NOT pass temperature when do_sample=False
         )
 
     generated_ids_trimmed = [
@@ -148,8 +155,9 @@ def main():
     print(f"\n[2/4] Loading Qwen Model ({args.qwen_model_path})...")
     qwen_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.qwen_model_path,
-        torch_dtype="auto",
-        device_map="auto"
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        attn_implementation="sdpa",
     )
     qwen_model.eval()
     qwen_processor = AutoProcessor.from_pretrained(args.qwen_model_path)

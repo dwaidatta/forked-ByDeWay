@@ -58,6 +58,13 @@ class SpatialAnalyzer:
         if self.is_yolo_world:
             from ultralytics import YOLOWorld
             self.model = YOLOWorld(model_path)
+            # YOLO-World: move the underlying PyTorch model to the correct device
+            # so that CLIP text encoder tokens and model weights are co-located.
+            # Without this, set_classes() crashes on GPU with:
+            #   RuntimeError: Expected all tensors to be on the same device
+            # (CLIP tokenizer outputs CPU tensors; model weights are on cuda:0)
+            if self.device == "cuda":
+                self.model.model.to(self.device)
         else:
             self.model = YOLO(model_path)
         self._current_classes = None
@@ -79,7 +86,16 @@ class SpatialAnalyzer:
         sorted_classes = sorted(set(c.strip() for c in classes if c.strip()))
         if sorted_classes == self._current_classes:
             return
-        self.model.set_classes(sorted_classes)
+        try:
+            self.model.set_classes(sorted_classes)
+        except RuntimeError as e:
+            # GPU device mismatch fallback: CLIP tokenizer may produce CPU tensors
+            # even after model.to(device). Move model explicitly and retry once.
+            if "same device" in str(e) and self.device == "cuda":
+                self.model.model.to(self.device)
+                self.model.set_classes(sorted_classes)
+            else:
+                raise
         self._current_classes = sorted_classes
 
     def check_presence(self, image: np.ndarray, target_obj: str) -> bool:
